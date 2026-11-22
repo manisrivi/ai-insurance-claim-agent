@@ -1,0 +1,22 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+
+# Secrets (any .env file), but keep the examples
+.env
+.env.*
+!.env.example
+
+# Local data
+backend/chroma_db/
+
+# Mac
+.DS_Store
+
+# Frontend
+node_modules/
+.next/
