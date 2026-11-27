@@ -1,122 +1,281 @@
-# AI Insurance Claim Agent
+<div align="center">
 
-An AI agent that reviews **health insurance claims**. A customer submits a claim form with a hospital bill PDF. A LangGraph agent reads the bill, checks the policy with RAG, checks for fraud, and then approves, rejects, or sends the claim to a human officer.
+# 🛡️ ClaimCare AI
 
-> Learning project. The policy and bills in `backend/data/` are fictional.
+### AI agent that reviews health insurance claims in minutes, not weeks
 
-## How it works
+[![CI](https://github.com/manisrivi/ai-insurance-claim-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/manisrivi/ai-insurance-claim-agent/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![LangGraph](https://img.shields.io/badge/LangGraph-1C3C3C?logo=langchain&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-000000?logo=nextdotjs&logoColor=white)
+![Supabase](https://img.shields.io/badge/Supabase-3FCF8E?logo=supabase&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
 
+![ClaimCare AI demo](docs/demo.gif)
+
+</div>
+
+---
+
+## 📌 Overview
+
+Health insurance claims are slow because a person has to read every hospital bill, check it against the policy, and look for fraud.
+
+**ClaimCare AI** automates that review with a **LangGraph multi-step agent**:
+
+1. A customer submits a claim form with the **hospital bill PDF**.
+2. The agent **reads the bill**, **checks the policy with RAG** (with an exact section citation), and **checks for fraud**.
+3. Simple claims are **approved or rejected automatically**. Risky claims **pause** and wait for a **human officer** (human-in-the-loop).
+
+> **Portfolio project.** The insurance policy and the sample bills in `backend/data/` are fictional.
+
+---
+
+## ✨ Features
+
+| For | Feature |
+|---|---|
+| 👤 Customer | Submit a claim with a bill PDF and get a random Claim ID (`CLM-7F3K-Q9XA`) |
+| 👤 Customer | Track a claim live by Claim ID, or by policy number + patient name |
+| 👤 Customer | Clear decision with the policy section that was used (e.g. *"Covered under Section 2.1"*) |
+| 🤖 AI agent | Extracts bill details with structured output and compares them with the form |
+| 🤖 AI agent | Finds the right policy sections with RAG (ChromaDB) and verifies the citation |
+| 🤖 AI agent | Fraud check: field mismatches, claim history, and an LLM risk opinion |
+| 🧑‍💼 Officer | Review queue with summary cards, a side-by-side *form vs bill* view, and approve/reject with a note |
+| 🧑‍💼 Officer | The paused agent resumes from where it stopped after the officer decides |
+
+---
+
+## 🏗️ Architecture
+
+```mermaid
+flowchart LR
+    U[Customer<br/>Next.js] -->|POST /claims<br/>form + PDF| API[FastAPI]
+    API -->|save: processing| DB[(Supabase<br/>Postgres)]
+    API -->|background task| G[LangGraph agent]
+    G -->|RAG search| V[(ChromaDB<br/>policy vectors)]
+    G -->|LLM calls| L[Gemini<br/>Claude backup]
+    G -->|checkpoints| DB
+    O[Officer<br/>Next.js] -->|POST decision| API
+    API -->|resume| G
 ```
-Customer ──POST /claims (form + PDF)──▶ FastAPI ──save──▶ Supabase (status: processing)
-                                           │
-                                           └─ background task ─▶ LangGraph agent
-                                                                  │
-   START → document → policy (RAG) → fraud → decide ─┬─ approved / rejected ─▶ finalize → END
-                                                     └─ officer_review ─▶ mark_for_officer → officer (pause ⏸)
-                                                                                          │
-                       Officer ──POST /officer/claims/{id}/decision──▶ resume ▶ finalize → END
+
+### Agent graph
+
+```mermaid
+flowchart TD
+    S([START]) --> D[document<br/>read the bill]
+    D --> P[policy<br/>RAG + citation check]
+    P --> F[fraud<br/>rules + history + LLM]
+    F --> DE{decide<br/>business rules}
+    DE -->|approved / rejected| FI[finalize]
+    DE -->|officer_review| M[mark_for_officer]
+    M --> OF[officer<br/>interrupt and wait]
+    OF -->|officer decides| FI
+    FI --> E([END])
 ```
 
 | Node | Job |
 |---|---|
-| **document** | The LLM extracts bill fields (structured output). Code compares them with the form (amount, name, hospital, dates). |
-| **policy** | RAG: ChromaDB finds the policy sections, then the LLM decides covered / not covered / unclear. Code checks that the cited section really exists in the retrieved text. |
-| **fraud** | Always checks the claim history tool. The LLM gives a risk opinion; hard rules in code (mismatch, too many claims) force high risk. |
-| **decide** | Pure code business rules: not covered → rejected; unclear, above the limit, high risk, or above ₹50,000 → officer review; otherwise approved. |
-| **officer** | Human in the loop with `interrupt()`. The graph is saved in Postgres (`PostgresSaver`, `thread_id = claim_id`) and resumes after the officer decides. |
-| **finalize** | Writes the final status to Supabase. |
+| `document` | The LLM extracts the bill fields (structured output). Code compares them with the form: name, hospital, dates, amount (1% tolerance). |
+| `policy` | ChromaDB finds the top policy sections. The LLM decides *covered / not covered / unclear*. Code checks that the cited section really exists in the retrieved text. |
+| `fraud` | Always checks the claim history. The LLM gives a risk opinion, and hard rules in code (mismatch, too many claims) force high risk. |
+| `decide` | Pure code: not covered → rejected; unclear, high risk, or above ₹50,000 → officer review; otherwise approved. |
+| `officer` | Human-in-the-loop with `interrupt()`. State is saved in Postgres (`PostgresSaver`, `thread_id = claim_id`). |
+| `finalize` | Writes the final status and notes to Supabase. |
 
-**Production touches:** LLM fallback (Gemini → Claude), timeouts and retries, structured output, prompt-injection guards, business rules in code, a citation check, background processing, a safe fallback to the officer if the AI fails, PDF validation, parameterized SQL, an officer API key, LangSmith tracing, and tests with a fake LLM.
+---
 
-## Stack
+## 🧠 Design decisions
 
-Next.js · shadcn/ui · FastAPI · LangGraph · LangChain · Gemini (`gemini-3.5-flash-lite`, `gemini-embedding-001`) · Claude (backup) · ChromaDB · Supabase Postgres · psycopg 3 · pytest · LangSmith
+| Decision | Why |
+|---|---|
+| **LangGraph** instead of a single LLM call | Each step is a clear node that can be tested on its own. Conditional edges route claims, and `interrupt()` gives a real pause/resume for the human officer. |
+| **Business rules in code, not in the prompt** | Money decisions must be predictable. The LLM gives opinions; code makes the final call, so a clever bill text can't change the rules. |
+| **RAG with a citation check** | The policy is too long for every prompt. RAG sends only the relevant sections, and the citation check stops the LLM from inventing a section number. |
+| **Human-in-the-loop for risky claims** | High-value or suspicious claims need a person. The agent pauses, saves its state, and resumes after the decision, so no work is lost. |
+| **Postgres checkpointer** | Agent state survives server restarts. Claims stuck in processing are recovered on startup. |
+| **Background processing** | The customer gets a Claim ID instantly and is not blocked while the AI works. |
+| **Safe fallback** | If the AI fails or times out, the claim goes to an officer instead of being lost or wrongly approved. |
+| **Gemini with a Claude backup** | Retries and a backup provider keep the agent working when one API is down or rate-limited. |
+| **ChromaDB local / cloud switch** | A local folder in development, Chroma Cloud in production (`CHROMA_MODE`). Similarity is computed in code, so both modes score the same. |
 
-## Run with Docker (easiest)
+---
 
-Needs Docker Desktop. Fill in `backend/.env` first (copy from `backend/.env.example`).
+## 🧰 Tech stack
 
-```bash
-docker compose up --build     # first time (builds the images)
-docker compose up             # next times
-docker compose down           # stop
+| Layer | Tools |
+|---|---|
+| Frontend | Next.js (App Router), TypeScript, shadcn/ui, Tailwind CSS |
+| Backend | Python, FastAPI, Pydantic, psycopg 3 |
+| AI | LangGraph, LangChain, Gemini (`gemini-3.5-flash-lite`), Claude (backup) |
+| RAG | ChromaDB, `gemini-embedding-001`, pypdf, RecursiveCharacterTextSplitter |
+| Database | Supabase (PostgreSQL): claims + agent checkpoints |
+| Observability | LangSmith tracing |
+| Quality | pytest (fake LLM, no real DB needed), ESLint |
+| DevOps | Docker, Docker Compose, GitHub Actions CI |
+
+---
+
+## 📁 Project structure
+
+```
+ai-insurance-claim-agent/
+├── backend/
+│   ├── app/
+│   │   ├── main.py          # FastAPI app, routes, rate limits
+│   │   ├── config.py        # settings from .env
+│   │   ├── db.py            # Supabase / Postgres queries
+│   │   ├── llm.py           # Gemini + Claude with fallback
+│   │   ├── schemas.py       # Pydantic models
+│   │   ├── agent/           # LangGraph: state, nodes, graph, runner
+│   │   └── rag/             # ingest, store, retriever (ChromaDB)
+│   ├── data/                # fictional policy.pdf + sample bills
+│   ├── sql/schema.sql       # database tables
+│   └── tests/               # pytest suite
+├── frontend/
+│   └── src/app/             # landing, submit, track, status, officer pages
+├── docker-compose.yml
+└── .github/workflows/ci.yml
 ```
 
-Open http://localhost:3000 (API docs: http://localhost:8000/docs).
+---
 
-## Run locally (without Docker)
+## 🚀 Getting started
 
+### Option 1: Docker (easiest)
+
+Needs Docker Desktop.
+
+```bash
+cp backend/.env.example backend/.env   # then fill in your values
+docker compose up --build              # first time
+docker compose up                      # next times
+docker compose down                    # stop
+```
+
+Open **http://localhost:3000** (API docs: http://localhost:8000/docs).
+
+### Option 2: Run locally
+
+**Backend**
 ```bash
 cd backend
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env          # then fill in your real values
+cp .env.example .env              # fill in your values
 # Run sql/schema.sql once in the Supabase SQL editor
-python -m app.rag.ingest      # load the policy into ChromaDB
-uvicorn app.main:app --reload # open http://127.0.0.1:8000/docs
+python -m app.rag.ingest          # load the policy into ChromaDB
+uvicorn app.main:app --reload     # http://127.0.0.1:8000/docs
 ```
 
-Frontend (Next.js + shadcn/ui), in a second terminal:
-
+**Frontend** (second terminal)
 ```bash
 cd frontend
 npm install
 cp .env.example .env.local
-npm run dev                   # open http://localhost:3000
+npm run dev                       # http://localhost:3000
 ```
 
-Run the backend tests (no real DB or LLM needed):
+### Environment variables
+
+| Variable | Purpose |
+|---|---|
+| `GOOGLE_API_KEY` | Gemini (LLM + embeddings) |
+| `ANTHROPIC_API_KEY` | Claude backup (optional) |
+| `DATABASE_URL` | Supabase Postgres connection string |
+| `OFFICER_API_KEY` | Officer access key (24+ random characters in production) |
+| `ENVIRONMENT` | `development` or `production` |
+| `CORS_ORIGINS` | Allowed frontend URLs |
+| `CHROMA_MODE` | `local` or `cloud` (+ `CHROMA_API_KEY`, `CHROMA_TENANT`, `CHROMA_DATABASE`) |
+| `LANGSMITH_*` | Tracing (optional) |
+
+See `backend/.env.example` for the full list. Never commit `.env`.
+
+---
+
+## 🧪 Testing
 
 ```bash
+cd backend
 pip install -r requirements-dev.txt
 pytest -q
 ```
 
-CI (GitHub Actions) runs the backend tests and the frontend lint + build on every push.
+The tests use a **fake LLM** and need **no real database or API keys**. They cover the PDF reader, business rules, the agent graph, RAG, the API, and security checks.
+**GitHub Actions** runs the backend tests and the frontend lint + build on every push.
 
-## API
+---
+
+## 🔌 API
 
 | Method | Path | Who | Purpose |
 |---|---|---|---|
-| GET | `/health` | anyone | Server check |
-| POST | `/claims` | customer | Submit the form + bill PDF → returns the Claim ID |
-| GET | `/claims/{claim_id}` | customer | Status of one claim |
-| GET | `/claims?policy_number=&patient_name=` | customer | Claims for a policy + patient (both must match) |
-| GET | `/officer/claims` | officer (`X-Officer-Key`) | Claims waiting for review |
-| POST | `/officer/claims/{claim_id}/decision` | officer (`X-Officer-Key`) | `{"decision": "approved" \| "rejected", "note": "..."}` |
+| `GET` | `/health` | anyone | Server check |
+| `POST` | `/claims` | customer | Submit the form + bill PDF → returns the Claim ID |
+| `GET` | `/claims/{claim_id}` | customer | Status of one claim |
+| `GET` | `/claims?policy_number=&patient_name=` | customer | Claims for a policy + patient (both must match) |
+| `GET` | `/officer/claims` | officer (`X-Officer-Key`) | Claims waiting for review |
+| `POST` | `/officer/claims/{claim_id}/decision` | officer (`X-Officer-Key`) | `{"decision": "approved" \| "rejected", "note": "..."}` |
 
-## Before going live (checklist)
+---
 
-- [ ] `backend/.env`: `ENVIRONMENT=production` (hides API docs, refuses weak officer keys)
-- [ ] `OFFICER_API_KEY`: 24+ random characters, kept secret
-- [ ] `CORS_ORIGINS`: your live frontend URL, e.g. `https://claimcare.vercel.app`
-- [ ] Frontend built with `NEXT_PUBLIC_API_URL` = your live backend URL
-- [ ] ChromaDB: `CHROMA_MODE=cloud` + `CHROMA_API_KEY`, `CHROMA_TENANT`, `CHROMA_DATABASE` (Chroma Cloud), then `python -m app.rag.ingest` once
-- [ ] Remove test data: `python -m app.reset_demo_data --yes` (deletes ALL claims)
-- [ ] Note: Supabase free tier pauses after 7 days without use; Gemini free tier has rate limits
+## 🔒 Security
 
-## Security notes
+- **Unguessable Claim IDs** (`CLM-7F3K-Q9XA`), so nobody can browse other people's claims
+- **Policy search needs both** the policy number and the patient name
+- **Rate limits per IP** for submits, reads and officer requests (HTTP 429)
+- **PDF validation** (type, size, pages, encryption). PDFs are never stored, only their text
+- **Prompt-injection guard**: bill text is treated as data, and business rules live in code
+- **Parameterized SQL** everywhere
+- **Officer key** checked with a constant-time compare; weak keys are refused in production
+- **Bill text and AI notes are never returned to customers**
+- API docs are hidden in production
 
-- Claim IDs are random (`CLM-7F3K-Q9XA`), so nobody can guess other people's claims
-- Searching by policy needs the policy number **and** the patient name
-- Rate limits per IP: submits, reads, officer requests (HTTP 429 when exceeded)
-- ChromaDB runs locally (folder) in development and on Chroma Cloud in production (`CHROMA_MODE`); similarity is computed in code so both modes score the same
-- PDFs are validated (type, size, pages, encryption) and never stored; only their text is kept
-- Bill text and AI notes are never returned to customers
-- Prompt-injection guard: bill text is treated as data; business rules are enforced in code
+---
 
-## Sample bills (`backend/data/sample_bills/`)
+## 📄 Sample bills
 
-| Bill | Form amount | Expected |
+Ready-made test bills in `backend/data/sample_bills/`:
+
+| Bill | Form amount | Expected result |
 |---|---|---|
-| 1. Dengue, ₹18,500 | 18500 | approved |
-| 2. Cosmetic rhinoplasty, ₹45,000 | 45000 | rejected (Section 3.1) |
-| 3. Angioplasty, ₹75,000 | 75000 | officer_review (above ₹50,000) |
-| 4. Viral fever, bill ₹6,500 | **80000** | officer_review (amount mismatch) |
+| 1. Dengue, ₹18,500 | 18500 | ✅ Approved (Section 2.1) |
+| 2. Cosmetic rhinoplasty, ₹45,000 | 45000 | ❌ Rejected (Section 3.1) |
+| 3. Angioplasty, ₹75,000 | 75000 | 🧑‍💼 Officer review (above ₹50,000) |
+| 4. Viral fever, bill ₹6,500 | 80000 | 🧑‍💼 Officer review (amount mismatch) |
 
-## Next
+---
 
-- Officer login (replace the API key)
-- Store PDFs in Supabase Storage + vision for scanned bills
-- Docker, deploy, GitHub Actions
-- Evals (golden dataset)
+## ☁️ Deployment checklist
+
+- [ ] `ENVIRONMENT=production` (hides API docs, refuses weak officer keys)
+- [ ] `OFFICER_API_KEY`: 24+ random characters
+- [ ] `CORS_ORIGINS`: the live frontend URL
+- [ ] Frontend built with `NEXT_PUBLIC_API_URL` = the live backend URL
+- [ ] Chroma Cloud settings, then `python -m app.rag.ingest` once
+- [ ] Remove test data: `python -m app.reset_demo_data --yes` (deletes **all** claims)
+
+> Supabase free tier pauses after 7 days without use. Gemini free tier has rate limits.
+
+---
+
+## 🗺️ Roadmap
+
+- [x] LangGraph agent with human-in-the-loop
+- [x] RAG with citation check
+- [x] Next.js frontend (customer + officer)
+- [x] Docker + GitHub Actions CI
+- [ ] Live deployment
+- [ ] Officer login (replace the API key)
+- [ ] Store PDFs in Supabase Storage + vision model for scanned bills
+- [ ] Evals with a golden dataset (LangSmith)
+
+---
+
+## 👤 Author
+
+**Manikandan**: Full Stack AI Engineer (React · Next.js · Python · FastAPI · LangGraph · RAG)
+
+⭐ If you found this project useful, consider giving it a star!
