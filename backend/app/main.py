@@ -28,6 +28,7 @@ async def lifespan(app: FastAPI):
     # Startup: connect to the database and prepare the agent
     db.open_pool()
     runner.start_agent()
+    db.harden_database()
     # Finish claims left "processing" by an earlier run (in the background, so startup stays fast)
     threading.Thread(target=runner.recover_stuck_claims, daemon=True).start()
     yield
@@ -69,6 +70,10 @@ def submit_claim(
     bill: Annotated[UploadFile, File(description="Hospital bill as a PDF")],
     background: BackgroundTasks,
 ):
+    # 0. Site-wide daily cap: even many different IPs cannot run up the LLM bill
+    if db.count_claims_since(hours=24) >= settings.max_claims_per_day:
+        raise HTTPException(status_code=429, detail="We have reached today's claim limit. Please try again tomorrow.")
+
     # 1. Read at most limit+1 bytes (a huge upload must not fill the server's memory)
     file_bytes = bill.file.read(MAX_FILE_SIZE_BYTES + 1)
     try:

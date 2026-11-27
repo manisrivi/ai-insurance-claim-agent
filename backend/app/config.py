@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     rate_limit_read_per_min: int = 60
     rate_limit_officer_per_min: int = 60
 
+    # Safety cap: total new claims per 24 hours for the whole site (protects the LLM bill)
+    max_claims_per_day: int = 200
+
+    # How many trusted proxies sit in front of the API (Render/Railway/Nginx = 1).
+    # 0 = use the direct connection IP. Never trust X-Forwarded-For blindly: users can fake it.
+    trusted_proxy_hops: int = 0
+
     # LangSmith tracing (optional)
     langsmith_tracing: bool = False
     langsmith_api_key: str = ""

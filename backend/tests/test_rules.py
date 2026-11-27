@@ -101,3 +101,12 @@ def test_citation_at_end_of_sentence_is_valid(base_state, monkeypatch):
     monkeypatch.setattr(nodes, "get_structured_llm", FakeLLM({"PolicyCheck": PolicyCheck(
         coverage="covered", per_claim_limit=100000, section="Section 2.1", reason="ok")}))
     assert nodes.policy_node(base_state)["is_covered"] is True
+
+
+def test_name_match_is_whole_words():
+    from app.agent.nodes import _same_text
+    assert _same_text("Ravi", "Ravi Kumar")            # part of the full name
+    assert _same_text("Mayoclinic", "Mayo Clinic")     # spaces ignored
+    assert _same_text("RAVI KUMAR", "ravi kumar.")      # case and punctuation ignored
+    assert not _same_text("An", "Jane Doe")             # short text hidden inside another name
+    assert not _same_text("John Doe", "Jane Doe")

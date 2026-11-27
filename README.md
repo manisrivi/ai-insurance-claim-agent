@@ -179,6 +179,8 @@ npm run dev                       # http://localhost:3000
 | `OFFICER_API_KEY` | Officer access key (24+ random characters in production) |
 | `ENVIRONMENT` | `development` or `production` |
 | `CORS_ORIGINS` | Allowed frontend URLs |
+| `TRUSTED_PROXY_HOPS` | Proxies in front of the API (0 locally, 1 on Render) |
+| `MAX_CLAIMS_PER_DAY` | Site-wide daily cap on new claims |
 | `CHROMA_MODE` | `local` or `cloud` (+ `CHROMA_API_KEY`, `CHROMA_TENANT`, `CHROMA_DATABASE`) |
 | `LANGSMITH_*` | Tracing (optional) |
 
@@ -216,12 +218,15 @@ The tests use a **fake LLM** and need **no real database or API keys**. They cov
 
 - **Unguessable Claim IDs** (`CLM-7F3K-Q9XA`), so nobody can browse other people's claims
 - **Policy search needs both** the policy number and the patient name
-- **Rate limits per IP** for submits, reads and officer requests (HTTP 429)
+- **Rate limits per IP** for submits, reads and officer requests (HTTP 429). The real IP is read safely behind a proxy (`TRUSTED_PROXY_HOPS`), so a faked `X-Forwarded-For` cannot bypass them
+- **Daily safety cap** on new claims for the whole site (`MAX_CLAIMS_PER_DAY`), so the LLM bill stays under control
+- **Row Level Security** on every table, so Supabase's public REST API cannot read claims
 - **PDF validation** (type, size, pages, encryption). PDFs are never stored, only their text
 - **Prompt-injection guard**: bill text is treated as data, and business rules live in code
 - **Parameterized SQL** everywhere
 - **Officer key** checked with a constant-time compare; weak keys are refused in production
-- **Bill text and AI notes are never returned to customers**
+- **One decision per claim**: a database lock stops two officers deciding the same claim at once
+- **Bill text, risk level and AI notes are never returned to customers**: they get a safe status message; only officers see the fraud details
 - API docs are hidden in production
 
 ---
@@ -244,6 +249,7 @@ Ready-made test bills in `backend/data/sample_bills/`:
 - [ ] `ENVIRONMENT=production` (hides API docs, refuses weak officer keys)
 - [ ] `OFFICER_API_KEY`: 24+ random characters
 - [ ] `CORS_ORIGINS`: the live frontend URL
+- [ ] `TRUSTED_PROXY_HOPS=1` when the API runs behind Render / Railway / Nginx
 - [ ] Frontend built with `NEXT_PUBLIC_API_URL` = the live backend URL
 - [ ] Chroma Cloud settings, then `python -m app.rag.ingest` once
 - [ ] Remove test data: `python -m app.reset_demo_data --yes` (deletes **all** claims)

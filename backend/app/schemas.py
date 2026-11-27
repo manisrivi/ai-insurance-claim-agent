@@ -38,8 +38,28 @@ class ClaimCreated(BaseModel):
     message: str
 
 
+CUSTOMER_MESSAGES = {
+    "processing": "Our AI is reading your bill and checking your policy.",
+    "officer_review": "Your claim needs a manual check by a claims officer. The decision will appear here.",
+}
+
+
+def customer_message(status: str, reason: str | None) -> str:
+    # What a customer may see. Fraud checks and AI notes stay internal: showing them
+    # would teach a fraudster exactly what to change next time.
+    if status in CUSTOMER_MESSAGES:
+        return CUSTOMER_MESSAGES[status]
+    reason = reason or ""
+    if reason.startswith("Officer "):
+        return f"{'Approved' if status == 'approved' else 'Rejected'} after review by a claims officer."
+    # AI decisions only quote the policy ("Covered under Section 2.1 ..." / "Not covered (Section 3.1) ...")
+    if reason.startswith(("Covered under", "Not covered")):
+        return reason
+    return "Your claim was approved." if status == "approved" else "Your claim was rejected."
+
+
 class ClaimOut(BaseModel):
-    # OUT: what the customer sees when searching (no internal fields)
+    # OUT: what the customer sees. No risk level and no AI notes (internal only).
     claim_id: str
     patient_name: str
     policy_number: str
@@ -50,11 +70,19 @@ class ClaimOut(BaseModel):
     amount: float
     description: str | None = None
     status: ClaimStatus
-    risk: Literal["low", "high"] | None = None
-    reason: str | None = None
+    message: str = ""
     officer_note: str | None = None
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def add_customer_message(cls, data):
+        # Build the safe message from the database row (status + internal reason)
+        if isinstance(data, dict) and "status" in data:
+            data = {**data, "message": customer_message(data["status"], data.get("reason"))}
+        return data
+
 
 class OfficerDecision(BaseModel):
     # IN: an officer's final decision on a claim
@@ -65,5 +93,8 @@ class OfficerDecision(BaseModel):
 
 
 class OfficerClaimOut(ClaimOut):
-    # OUT: officers also see what the AI read from the bill
+    # OUT: officers also see the risk, the AI notes and what the AI read from the bill
+    risk: Literal["low", "high"] | None = None
+    reason: str | None = None
     extracted_details: dict | None = None
+

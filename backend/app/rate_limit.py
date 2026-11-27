@@ -6,6 +6,8 @@ from collections import defaultdict, deque
 
 from fastapi import HTTPException, Request
 
+from app.config import settings
+
 
 class RateLimiter:
     def __init__(self, max_requests: int, window_seconds: int):
@@ -35,8 +37,15 @@ class RateLimiter:
             self.hits.clear()
 
 
-def client_ip(request: Request) -> str:
-    # Behind a proxy, run uvicorn with --proxy-headers so this is the real user IP
+def client_ip(request: Request, hops: int | None = None) -> str:
+    # The real user IP, without trusting anything the user can fake.
+    # X-Forwarded-For looks like "fake-by-user, real-user-ip": each proxy ADDS the IP it saw
+    # at the END. So with N trusted proxies we read the Nth entry from the right.
+    hops = settings.trusted_proxy_hops if hops is None else hops
+    if hops > 0:
+        forwarded = [ip.strip() for ip in request.headers.get("x-forwarded-for", "").split(",") if ip.strip()]
+        if len(forwarded) >= hops:
+            return forwarded[-hops]
     return request.client.host if request.client else "unknown"
 
 

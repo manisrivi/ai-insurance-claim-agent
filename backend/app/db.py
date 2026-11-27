@@ -1,5 +1,7 @@
 # db.py: the "clerk" that reads and writes the claims table in Supabase
+import logging
 import secrets
+from contextlib import contextmanager
 
 from psycopg import errors, sql
 from psycopg.rows import dict_row
@@ -36,6 +38,36 @@ def open_pool():
 def close_pool():
     # Close connections when the app stops
     pool.close()
+
+
+# Safe to run on every start (all "if not exists" / idempotent)
+HARDENING_SQL = [
+    # Supabase shares the "public" schema through its REST API. Row Level Security with
+    # no policies = that API sees nothing. Our backend connects as the table owner, so it still works.
+    "alter table if exists claims enable row level security",
+    "alter table if exists checkpoints enable row level security",
+    "alter table if exists checkpoint_blobs enable row level security",
+    "alter table if exists checkpoint_writes enable row level security",
+    "alter table if exists checkpoint_migrations enable row level security",
+    # Old sequential IDs (CLM-2026-0001) were guessable; the app always sends a random ID now
+    "alter table if exists claims alter column claim_id drop default",
+    # Indexes that match how we search (lower/upper) and list (status, date)
+    "create index if not exists idx_claims_policy_upper on claims (upper(policy_number))",
+    "create index if not exists idx_claims_patient_lower on claims (lower(patient_name))",
+    "create index if not exists idx_claims_status_created on claims (status, created_at)",
+    "create index if not exists idx_claims_created on claims (created_at)",
+]
+
+
+def harden_database() -> None:
+    # Called at startup, after the agent created its checkpoint tables
+    log = logging.getLogger(__name__)
+    with pool.connection() as conn:
+        for statement in HARDENING_SQL:
+            try:
+                conn.execute(statement)
+            except Exception as error:
+                log.warning("Database hardening step skipped (%s): %s", statement, error)
 
 
 # Claim ID letters: no 0/O or 1/I/L, so people can read and type them easily
@@ -124,6 +156,29 @@ def count_recent_claims(patient_name: str, days: int = 30) -> int:
             (patient_name, days),
         ).fetchone()
         return row["total"]
+
+
+def count_claims_since(hours: int = 24) -> int:
+    # All new claims on the whole site in the last N hours (daily safety cap)
+    with pool.connection() as conn:
+        row = conn.execute(
+            "select count(*) as total from claims where created_at > now() - make_interval(hours => %s)",
+            (hours,),
+        ).fetchone()
+        return row["total"]
+
+
+@contextmanager
+def decision_lock(claim_id: str):
+    # A database lock per claim: works even with many server copies (an in-memory lock would not).
+    # Yields True if we got the lock, False if another officer is deciding this claim right now.
+    with pool.connection() as conn:
+        with conn.transaction():
+            got = conn.execute(
+                "select pg_try_advisory_xact_lock(hashtextextended(%s, 0)) as ok", (claim_id,)
+            ).fetchone()["ok"]
+            yield got
+
 
 def list_by_status(status: str, limit: int = 100) -> list[dict]:
     # Officer list: claims with one status, oldest first (first come, first served)

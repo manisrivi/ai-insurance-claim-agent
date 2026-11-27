@@ -23,3 +23,15 @@ def test_rejects_fake_pdf():
 def test_rejects_empty_file():
     with pytest.raises(PDFValidationError, match="empty"):
         read_pdf(b"", "bill.pdf", "application/pdf")
+
+
+def test_strange_pdf_gives_clear_error_not_crash(bill_bytes, monkeypatch):
+    from app import pdf_reader
+
+    class Broken:
+        def __init__(self, *a, **k):
+            raise ValueError("weird internal pypdf error")
+
+    monkeypatch.setattr(pdf_reader, "PdfReader", Broken)
+    with pytest.raises(PDFValidationError):
+        read_pdf(bill_bytes, "bill.pdf", "application/pdf")

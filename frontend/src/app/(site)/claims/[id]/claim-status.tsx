@@ -132,7 +132,7 @@ export function ClaimStatusView() {
         <InfoIcon className="mr-1.5 inline size-4 align-[-3px]" />
         {processing
           ? "Our AI is reading your bill and checking your policy. This usually takes under a minute."
-          : claim.reason ?? "No reason given."}
+          : claim.message}
         {claim.officer_note && <p className="mt-1.5"><span className="font-medium">Officer note:</span> {claim.officer_note}</p>}
       </div>
 

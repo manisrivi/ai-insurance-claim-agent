@@ -38,7 +38,10 @@ def read_pdf(file_bytes: bytes, filename: str, content_type: str | None) -> dict
         if reader.is_encrypted:
             raise PDFValidationError("Password-protected PDFs are not allowed")
         page_count = len(reader.pages)
-    except PdfReadError:
+    except PDFValidationError:
+        raise
+    except (PdfReadError, Exception):
+        # Any parser error on a strange PDF = a clear 400, never a 500
         raise PDFValidationError("The PDF is damaged and cannot be read")
 
     # 5. Page limit
@@ -46,7 +49,10 @@ def read_pdf(file_bytes: bytes, filename: str, content_type: str | None) -> dict
         raise PDFValidationError(f"PDF can have at most {MAX_PAGES} pages")
 
     # 6. Read all text; very little text means it's probably scanned
-    text = "\n".join(page.extract_text() or "" for page in reader.pages).strip()
+    try:
+        text = "\n".join(page.extract_text() or "" for page in reader.pages).strip()
+    except Exception:
+        raise PDFValidationError("The PDF text could not be read")
 
     return {
         "text": text,

@@ -44,12 +44,27 @@ def _normalize(text: str) -> str:
     return "".join(ch for ch in text.lower() if ch.isalnum())
 
 
+# A joined name shorter than this is too short to match inside a longer one ("An" in "Jane")
+MIN_PARTIAL_MATCH_LENGTH = 8
+
+
+def _words(text: str) -> set[str]:
+    # "Ravi  Kumar." -> {"ravi", "kumar"}
+    return {w for w in "".join(ch if ch.isalnum() else " " for ch in text.lower()).split() if w}
+
+
 def _same_text(a: str | None, b: str | None) -> bool:
-    # Simple name match: ignores case, spaces and punctuation; skip if one side is missing
+    # Name match that ignores case, spaces and punctuation. Skip if one side is missing.
     if not a or not b:
         return True
+    # 1. Whole words: "Ravi" matches "Ravi Kumar", but "An" does not match "Jane Doe"
+    words_a, words_b = _words(a), _words(b)
+    if words_a <= words_b or words_b <= words_a:
+        return True
+    # 2. Joined letters: "Mayoclinic" matches "Mayo Clinic" (only for long enough names)
     a, b = _normalize(a), _normalize(b)
-    return a in b or b in a
+    shorter, longer = sorted((a, b), key=len)
+    return shorter == longer or (len(shorter) >= MIN_PARTIAL_MATCH_LENGTH and shorter in longer)
 
 
 def _find_mismatches(state: ClaimState, bill: BillDetails) -> list[str]:

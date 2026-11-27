@@ -101,7 +101,7 @@ export function ClaimDetailsDialog({ claim, onClose, onDecide }: Props) {
               </p>
 
               <div className="mt-5 grid gap-1.5">
-                <Label htmlFor="note">Officer note</Label>
+                <Label htmlFor="note">Officer note <span className="font-normal text-muted-foreground">(the customer can see this)</span></Label>
                 <Textarea
                   id="note"
                   rows={2}

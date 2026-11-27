@@ -15,8 +15,8 @@ export type Claim = {
   amount: number;
   description: string | null;
   status: ClaimStatus;
-  risk: "low" | "high" | null;
-  reason: string | null;
+  // Safe text for customers (fraud checks and AI notes stay internal)
+  message: string;
   officer_note: string | null;
   created_at: string;
   updated_at: string;
@@ -31,7 +31,12 @@ export type BillDetails = {
   total_amount: number | null;
 };
 
-export type OfficerClaim = Claim & { extracted_details: Partial<BillDetails> | null };
+// Officers also get the risk level, the AI notes and what the AI read from the bill
+export type OfficerClaim = Claim & {
+  risk: "low" | "high" | null;
+  reason: string | null;
+  extracted_details: Partial<BillDetails> | null;
+};
 
 export type ClaimCreated = { claim_id: string; status: ClaimStatus; message: string };
 

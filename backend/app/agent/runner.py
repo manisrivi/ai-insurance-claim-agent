@@ -1,7 +1,5 @@
 # runner.py: starts the agent for a claim, and resumes it after an officer decides
 import logging
-import threading
-from collections import defaultdict
 
 from langgraph.types import Command
 
@@ -11,8 +9,6 @@ from app.agent.graph import build_graph, close_checkpointer, open_checkpointer
 logger = logging.getLogger(__name__)
 
 _graph = None
-# One lock per claim: two officers clicking at the same moment cannot both decide
-_decision_locks: dict[str, threading.Lock] = defaultdict(threading.Lock)
 
 
 class AlreadyDecidedError(Exception):
@@ -61,10 +57,14 @@ def run_claim(claim_id: str) -> None:
     except Exception:
         logger.exception("Agent failed for claim %s", claim_id)
         # Safe fallback: a human checks it
-        db.update_claim(claim_id, {
-            "status": "officer_review",
-            "reason": "Automatic review failed. An officer will check this claim.",
-        })
+        try:
+            db.update_claim(claim_id, {
+                "status": "officer_review",
+                "reason": "Automatic review failed. An officer will check this claim.",
+            })
+        except Exception:
+            # DB is down too: the claim stays "processing" and is retried at the next start
+            logger.exception("Could not save the fallback status for claim %s", claim_id)
 
 
 def recover_stuck_claims() -> int:
@@ -85,8 +85,14 @@ def is_waiting_for_officer(claim_id: str) -> bool:
 
 def resume_claim(claim_id: str, decision: str, note: str | None) -> None:
     # Officer decided: continue the paused graph, or update directly if the AI had failed
-    with _decision_locks[claim_id]:
-        row = db.get_claim(claim_id)
+    row = db.get_claim(claim_id)
+    if row is None or row["status"] != "officer_review":
+        raise AlreadyDecidedError(claim_id)
+    # Two officers clicking at the same moment: only one gets the lock and decides
+    with db.decision_lock(claim_id) as got_lock:
+        if not got_lock:
+            raise AlreadyDecidedError(claim_id)
+        row = db.get_claim(claim_id)  # check again inside the lock
         if row is None or row["status"] != "officer_review":
             raise AlreadyDecidedError(claim_id)
         _apply_decision(claim_id, decision, note)
