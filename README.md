@@ -49,32 +49,11 @@ Health insurance claims are slow because a person has to read every hospital bil
 
 ## 🏗️ Architecture
 
-```mermaid
-flowchart LR
-    U[Customer<br/>Next.js] -->|POST /claims<br/>form + PDF| API[FastAPI]
-    API -->|save: processing| DB[(Supabase<br/>Postgres)]
-    API -->|background task| G[LangGraph agent]
-    G -->|RAG search| V[(ChromaDB<br/>policy vectors)]
-    G -->|LLM calls| L[Gemini<br/>Claude backup]
-    G -->|checkpoints| DB
-    O[Officer<br/>Next.js] -->|POST decision| API
-    API -->|resume| G
-```
+<p align="center">
+  <img src="docs/architecture.svg" alt="ClaimCare AI architecture" width="850">
+</p>
 
-### Agent graph
-
-```mermaid
-flowchart TD
-    S([START]) --> D[document<br/>read the bill]
-    D --> P[policy<br/>RAG + citation check]
-    P --> F[fraud<br/>rules + history + LLM]
-    F --> DE{decide<br/>business rules}
-    DE -->|approved / rejected| FI[finalize]
-    DE -->|officer_review| M[mark_for_officer]
-    M --> OF[officer<br/>interrupt and wait]
-    OF -->|officer decides| FI
-    FI --> E([END])
-```
+### Agent nodes
 
 | Node | Job |
 |---|---|
