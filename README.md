@@ -47,6 +47,18 @@ Health insurance claims are slow because a person has to read every hospital bil
 
 ---
 
+## 📸 Screenshots
+
+| Landing page | Submit a claim |
+|---|---|
+| <img src="docs/scene_1.png" alt="Landing page" width="420"> | <img src="docs/new_form_filled.png" alt="Claim form with bill upload" width="420"> |
+| **AI decision with policy citation** | **Track a claim** |
+| <img src="docs/new_approved.png" alt="Approved claim citing Section 2.1" width="420"> | <img src="docs/scene_4.png" alt="Track claim page" width="420"> |
+| **Officer review queue** | **Fraud check: form vs bill** |
+| <img src="docs/new_officer_list.png" alt="Officer review queue" width="420"> | <img src="docs/new_officer_popup.png" alt="Mismatch details popup" width="420"> |
+
+---
+
 ## 🏗️ Architecture
 
 <p align="center">
